@@ -40,14 +40,23 @@ kill_sb(struct super_block *sb)
     - [alloc_inode](#alloc_inode)
     - [destroy_inode](#destroy_inode)
     - [free_inode](#free_inode)
-- s_root - [root inode](#root-inode)
+- s_root = d_make_root([root inode](#root-inode))
+- s_time_gran
+- s_blocksize
+- s_blocksize_bits
+- s_nzones
+- s_dirsize
+- s_namelen
+- s_max_links  
  
 #### statfs
 statfs(struct dentry *dentry, struct kstatfs *buf)
 Fill in struct kstatfs.  
 
 ### fill_super(struct super_block *sb,  void *data,  int silent)
-Fill in struct super_block (described above) and initialize [root inode](#root-inode). 
+1. Fill in struct super_block (described above).
+2. Create and initialize [root inode](#root-inode).
+3. Call d_make_root(root_inode) and set result to sb->s_root. Check if != NULL.
 
 ## Inode
 ### struct super_operations [Read here](https://www.kernel.org/doc/html/next/filesystems/vfs.html)
@@ -61,6 +70,17 @@ Fill in struct super_block (described above) and initialize [root inode](#root-i
 - free_inode - implement if you use call_rcu() in destroy_inode() to free struct inode, then it's better to release memory here.
 
 ### inode_cache
+In start_kernel(): vfs_caches_init() -> inode_init() -> creates inode_hashtable (for ino -> struct inode) and inode_cachep - slab cache where actual struct inode objects are allocated.
+If your inode structure embeds struct inode, you should create your own your_inode_cachep:
+- kmem_cache_create - call before register_filesystem, args ([Read here](https://elixir.bootlin.com/linux/v6.17-rc1/source/include/linux/slab.h#L281)):
+    - name - cache name
+    - object_size - size of an object in the cache
+    - align 
+    - flags
+    - **ctor** - a constructor for the objects. In your constructor function you **must** call inode_init_once(&vfs_inode) to properly initialize the embedded struct inode.
+- kmem_cache_destroy - call after unregister_filesystem.
+- [alloc_inode_sb](#https://elixir.bootlin.com/linux/v6.17-rc1/source/include/linux/fs.h#L3405) - call in your alloc_inode().
+- kmem_cache_free - call in your free/destroy_inode().
 
 ### struct inode
 - i_ino - inode number. For on-disk FS ino is predefined (you get it from your structures). For in-mem FS can be generated dynamically using get_next_ino(). ino cannot be 0. (ino 0 - no inode)
@@ -75,7 +95,9 @@ Fill in struct super_block (described above) and initialize [root inode](#root-i
 
 - i_op - inode_operations. You define 2 sets of i_op: for directories and files.
 - i_fop - file_operations. You define 2 sets of i_fop: for directories and files.
-- i_nlink - number of hard links. 
+- i_nlink - number of hard links. Initialized with 1 (the link is between the filename and the actual data): alloc_inode() -> inode_init_always() -> inode_init_always_gfp().  
+For directories should be **at least 2**: first - '.', second - from the parent directory, other - from each child's directory('..').   
+For root - '.' and '..' both point to itself. 
     - inc_nlink(inode) - increment i_nlink
     - drop_nlink(inode) - decrement i_nlink
     - set_nlink(inode, N) - set i_nlink = N
@@ -102,26 +124,52 @@ inode_hashtable is a global inode hash table, where the key is (sb, ino). Used f
 - iget_locked(sb, ino) - similar to ilookup(), but if not in inode_hashtable -> alloc_inode() and returns it locked, hashed, and with the I_NEW flag set.
 - unlock_new_inode(inode) - called once the inode is fully initialized, to clear the new state of the inode and wake up anyone waiting for the inode to finish initialisation.
 
-Most FSes use ino as a unique identifier of on-disk inode structure and do not keep a direct pointer to struct inode. So, to be able to access struct inode based on ino, you should call insert_inode_hash(), when you creating a new inode. And to get actual struct inode from ino (iget), call iget_locked() -> check i_state: if I_NEW -> synchronize new inode with on-disk inode and call unlock_new_inode(). If iget_locked() returns I_NEW inode, it means only(!) that inode wasn't present in inode_hashtable, maybe because it was unused (i_count dropped to 0 and VFS destroyed it) or because it has never been hashed before.
+Most FSes use ino as a unique identifier of on-disk inode structure and do not keep a direct pointer to struct inode. So, to be able to access struct inode based on ino, you should call insert_inode_hash(), when you creating a new inode. And to get actual struct inode from ino **(iget)**, call iget_locked() -> check i_state: if I_NEW -> synchronize new inode with on-disk inode and call unlock_new_inode(). If iget_locked() returns I_NEW inode, it means only(!) that inode wasn't present in inode_hashtable, maybe because it was unused (i_count dropped to 0 and VFS destroyed it) or because it has never been hashed before.
+
+#### iget vs new_inode
+Both functions can be used to create a new struct inode.
+- new_inode(sb) - call it when creating a brand new inode that has never existed on disk: mkdir, mknod, create.
+- your custom iget(sb, ino) function  - call it when the inode may already exist on disk: during root_inode creation, lookup.
 
 ## root inode
+Create and initialize in fill_super().
+In **minix** FS root_inode creation and initialization is done in [iget()](#iget-vs-new_inode).
+- i_ino - predefined in your FS or get_next_ino(). Some FSes set root ino to 2 (0 - no inode, 1 - bad block).
+- i_nlink, i_op, i_fop - set as for directories.
+- i_sb - set to sb argument you receive in your fill_super().   
+
+The dentry for the root inode is created automatically during d_make_root() -> d_alloc_anon() ->  __d_alloc() -> [slash_name](https://elixir.bootlin.com/linux/v6.17-rc1/source/fs/dcache.c#L1702), which is "/".
 
 ## struct inode_operations
 
-| Operation | Directory | File |
-| ----------|:---------:|:----:| 
-| lookup    | +         | -    |
-| mkdir     | +         | -    |
-| rmdir     | +         | -    |
+| Operation        | Directory | File |
+| -----------------|:---------:|:----:| 
+| [lookup](#lookup)| +         | -    |
+| [mkdir](#mkdir)  | +         | -    |
+| [rmdir](#rmdir)  | +         | -    |
 
-### lookup(struct inode *parent, struct dentry *dentry, unsigned int flags)
-Checks if the name in dentry exists under the parent directory.
+### lookup
+lookup(struct inode *parent, struct dentry *dentry, unsigned int flags) - checks if the name in dentry exists under the parent directory.   
 
-### mkdir(struct mnt_idmap *idmap, struct inode *parent, struct dentry *dentry, umode_t mode)
-Creates a new directory with the given name in the parent directory.
+1. Check whether the given name in dentry is valid. If not, return ENAMETOOLONG.
+2. Call your lookup_name(dentry) that returns ino:
+    - ino == 0 -> entry doesn't exist -> d_add(dentry, NULL) - add dentry to the negative cache.  
+    - ino != 0 -> entry exists -> iget(ino) -> d_add(dentry, inode) - add dentry to the positive cache.
 
-### rmdir(struct inode *parent, struct dentry *dentry)
-Removes an **empty** directory with the given name from the parent directory.
+### mkdir
+mkdir(struct mnt_idmap *idmap, struct inode *parent, struct dentry *dentry, umode_t mode) - creates a new directory with the given name in the parent directory.   
+
+1. Create and initialize new inode.
+2. inc_nlink() for the parent directory and for the new directory.
+3. d_instantiate(dentry, inode) - attach the new inode to the dentry.
+
+### rmdir
+rmdir(struct inode *parent, struct dentry *dentry) - removes an **empty** directory with the given name from the parent directory.   
+
+1. Get inode (directory to remove) from the dentry: d_inode(dentry).
+2. Check if the directory is empty (your implementation). If not, return ENOTEMPTY.
+3. drop_nlink() for the parent directory and the current directory.
+
 
 ## struct file_operations
 
