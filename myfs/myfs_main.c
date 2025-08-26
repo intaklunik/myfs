@@ -1,5 +1,4 @@
 #include <linux/module.h>
-#include <linux/fs.h>
 #include <linux/statfs.h>
 #include "myfs_node.h"
 
@@ -7,7 +6,31 @@
 #define MYFS_MAGIC_NUMBER 0x1234
 #define MYFS_MAX_FILE_SIZE 512
 #define MYFS_BLOCK_SIZE_BITS 9
-#define MYFS_NAME_MAX 16
+
+
+static struct kmem_cache *myfs_inode_cachep;
+
+static void myfs_inode_init_once(void *foo)
+{
+	struct myfs_node *node = (struct myfs_node *)foo;
+	inode_init_once(&node->vfs_inode);
+}
+
+static int myfs_init_inodecache(void)
+{
+	myfs_inode_cachep = kmem_cache_create("myfs_inode_cache", sizeof(struct myfs_node), 0, 0, myfs_inode_init_once); 
+	
+	if (!myfs_inode_cachep) {
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
+static void myfs_destroy_inodecache(void)
+{
+	kmem_cache_destroy(myfs_inode_cachep);
+}
 
 static int myfs_statfs(struct dentry *dentry, struct kstatfs *buf)
 {
@@ -16,25 +39,35 @@ static int myfs_statfs(struct dentry *dentry, struct kstatfs *buf)
 	buf->f_type = dentry->d_sb->s_magic;
 	buf->f_bsize = dentry->d_sb->s_blocksize;
 	buf->f_namelen = MYFS_NAME_MAX;
+	
 	return 0;
+}
+
+static struct inode * myfs_alloc_inode(struct super_block *sb)
+{
+	struct myfs_node *node = alloc_inode_sb(sb, myfs_inode_cachep, GFP_KERNEL);
+	
+	if (!node) {
+		return NULL;
+	}	
+
+	return &node->vfs_inode;
 }
 
 static void myfs_destroy_inode(struct inode *inode)
 {
-	struct myfs_node *node = inode->i_private;
-	myfs_node_free(node, inode->i_mode);
-	inode->i_private = NULL;
+	kmem_cache_free(myfs_inode_cachep, itomyfs(inode));
 }
 
 static const struct super_operations myfs_ops = {
 	.statfs = myfs_statfs,
 	.drop_inode = generic_delete_inode,
+	.alloc_inode = myfs_alloc_inode,
 	.destroy_inode = myfs_destroy_inode,
 };
 
 static int myfs_fill_super(struct super_block *sb, void *data, int silent)
 {
-	int ret = 0;
 	sb->s_maxbytes = MYFS_MAX_FILE_SIZE;
 	sb->s_blocksize_bits = MYFS_BLOCK_SIZE_BITS;
 	sb->s_blocksize = 1 << sb->s_blocksize_bits;
@@ -42,20 +75,13 @@ static int myfs_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_op = &myfs_ops;
 	sb->s_time_gran = 1;
 	
-	struct myfs_dir *myfs_dir;
-       	ret = myfs_dir_init(&myfs_dir);
-	if (ret) {
-		return ret;
-	}
+	struct inode *root = myfs_create_root(sb);
 	
-	struct inode *inode;
-	inode = new_inode(sb);
-	inode->i_ino = myfs_dir->node.ino;
-	inode->i_sb = sb;
-	inode->i_op = &myfs_dir_iops;
-	inode->i_fop = &myfs_dir_fops;
-	inode->i_mode = S_IFDIR | 0777;
-	sb->s_root = d_make_root(inode);
+	if (IS_ERR(root)) {
+		return PTR_ERR(root);
+	}
+
+	sb->s_root = d_make_root(root);
 	if (!sb->s_root)
 		return -ENOMEM;
 
@@ -78,12 +104,24 @@ static struct dentry * myfs_mount(struct file_system_type *fs_type, int flags, c
 
 static int __init init_myfs(void)
 {
-	return register_filesystem(&myfs_type);
+	int ret = 0;
+
+	ret = myfs_init_inodecache();
+	if (ret) {
+		return ret;
+	}
+	ret = register_filesystem(&myfs_type);
+	if (ret) {
+		myfs_destroy_inodecache();
+	}
+
+	return ret;
 }
 
 static void __exit exit_myfs(void)
 {
 	unregister_filesystem(&myfs_type);
+	myfs_destroy_inodecache();
 }
 
 module_init(init_myfs);
