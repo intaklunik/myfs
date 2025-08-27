@@ -25,13 +25,14 @@ static int myfs_mkdir(struct mnt_idmap *idmap, struct inode *parent, struct dent
 static int myfs_rmdir(struct inode *parent, struct dentry *dentry)
 {
 	struct inode *dir = d_inode(dentry);
+	struct myfs_node *myfs_parent = itomyfs(parent);
 	struct myfs_node *myfs_dir = itomyfs(dir); 
-	
+
 	if (!myfs_is_dir_empty(myfs_dir)) {
 		return -ENOTEMPTY;
 	}
 
-	myfs_node_unlink(myfs_dir);
+	myfs_node_unlink(myfs_parent, myfs_dir);
 
 	drop_nlink(parent);
 	drop_nlink(dir);
@@ -59,6 +60,30 @@ static struct dentry * myfs_lookup(struct inode *parent, struct dentry *dentry, 
 	return NULL;
 }
 
+static int myfs_iterate_shared(struct file *file, struct dir_context *ctx)
+{
+	struct dentry *dentry = file->f_path.dentry;
+	struct inode *inode = dentry->d_inode;
+	struct myfs_node *myfs_dir = itomyfs(inode);
+	struct myfs_node *myfs_child;
+
+	if (!dir_emit_dots(file, ctx)) {
+		return 0;
+	}
+	if (ctx->pos >= 2 + myfs_dir->size) {
+		return 0;
+	}
+
+	list_for_each_entry(myfs_child, &myfs_dir->dir.children, list) {
+		if (!dir_emit(ctx, myfs_child->name, myfs_child->namelen, myfs_child->vfs_inode.i_ino, S_ISDIR(myfs_child->vfs_inode.i_mode) ? DT_DIR : DT_REG)) {
+			return 0;
+		}
+		ctx->pos++;
+	}
+
+	return 0;
+}
+
 const struct inode_operations myfs_dir_iops = { 
 	.lookup = myfs_lookup,
 	.mkdir = myfs_mkdir,
@@ -66,6 +91,7 @@ const struct inode_operations myfs_dir_iops = {
 };
 
 const struct file_operations myfs_dir_fops = { 
+	.iterate_shared = myfs_iterate_shared,
 	.open = generic_file_open,
 };
 

@@ -18,7 +18,7 @@ struct myfs_dir {
 
 struct myfs_node {
 	struct inode vfs_inode;
-	char name[MYFS_NAME_MAX];
+	unsigned char name[MYFS_NAME_MAX];
 	unsigned int namelen;
 	int size;
 	union {
@@ -36,7 +36,7 @@ inline int myfs_is_dir_empty(const struct myfs_node *dir);
 struct inode * myfs_create_root(struct super_block *sb);
 struct myfs_node * myfs_new_node(struct myfs_node *myfs_parent, struct dentry *dentry, umode_t mode);
 inline void myfs_node_link(struct myfs_node *parent, struct myfs_node *node);
-inline void myfs_node_unlink(struct myfs_node *node);
+inline void myfs_node_unlink(struct myfs_node *parent, struct myfs_node *node);
 struct myfs_node * myfs_node_lookup(struct myfs_node *parent, struct dentry *dentry);
 
 #endif //MYFS_NODE_H

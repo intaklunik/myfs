@@ -32,6 +32,7 @@ struct inode * myfs_create_root(struct super_block *sb)
 	root->i_mode = S_IFDIR | 0777;
 
 	INIT_LIST_HEAD(&myfs_root->dir.children);
+	myfs_root->size = 0;
 
 	set_nlink(root, 2);
 
@@ -49,9 +50,10 @@ struct myfs_node * myfs_new_node(struct myfs_node *myfs_parent, struct dentry *d
 	}
 
 	myfs_node = itomyfs(inode);
-	strscpy(myfs_node->name, dentry->d_name.name, dentry->d_name.len);
+	strscpy(myfs_node->name, dentry->d_name.name, MYFS_NAME_MAX);
 	myfs_node->namelen = dentry->d_name.len;
-	
+	myfs_node->size = 0;
+
 	inode->i_ino = get_next_ino();
 	inode->i_sb = parent->i_sb;
 	inode->i_mode = mode;
@@ -71,11 +73,13 @@ struct myfs_node * myfs_new_node(struct myfs_node *myfs_parent, struct dentry *d
 inline void myfs_node_link(struct myfs_node *parent, struct myfs_node *node)
 {
 	list_add_tail(&node->list, &parent->dir.children);
+	++parent->size;
 }
 
-inline void myfs_node_unlink(struct myfs_node *node)
+inline void myfs_node_unlink(struct myfs_node *parent, struct myfs_node *node)
 {
 	list_del_init(&node->list);
+	--parent->size;
 }
 
 struct myfs_node * myfs_node_lookup(struct myfs_node *parent, struct dentry *dentry)
