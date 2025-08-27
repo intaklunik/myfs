@@ -8,7 +8,7 @@ static int myfs_mkdir(struct mnt_idmap *idmap, struct inode *parent, struct dent
 	struct myfs_node *myfs_dir = myfs_new_node(myfs_parent, dentry, S_IFDIR | mode);
 
 	if (IS_ERR(myfs_dir)) {
-		return PTR_ERR(dir);
+		return PTR_ERR(myfs_dir);
 	}	
 
 	dir = &myfs_dir->vfs_inode;
@@ -84,10 +84,42 @@ static int myfs_iterate_shared(struct file *file, struct dir_context *ctx)
 	return 0;
 }
 
+static int myfs_create(struct mnt_idmap *idmap, struct inode *parent, struct dentry *dentry, umode_t mode, bool b)
+{
+	struct myfs_node *myfs_parent = itomyfs(parent);
+	struct inode *inode;
+	struct myfs_node *myfs_file = myfs_new_node(myfs_parent, dentry, mode);
+
+	if (IS_ERR(myfs_file)) {
+		return PTR_ERR(myfs_file);
+	}	
+
+	inode = &myfs_file->vfs_inode;
+
+       	myfs_node_link(myfs_parent, myfs_file);
+	
+	d_instantiate(dentry, inode);
+
+	return 0;
+}	
+
+static int myfs_unlink(struct inode *parent, struct dentry *dentry)
+{
+	struct inode *inode = d_inode(dentry);
+	struct myfs_node *myfs_parent = itomyfs(parent);
+	struct myfs_node *myfs_file = itomyfs(inode); 
+
+	myfs_node_unlink(myfs_parent, myfs_file);
+
+	return 0;
+}
+
 const struct inode_operations myfs_dir_iops = { 
 	.lookup = myfs_lookup,
 	.mkdir = myfs_mkdir,
 	.rmdir = myfs_rmdir,
+	.create = myfs_create,
+	.unlink = myfs_unlink,
 };
 
 const struct file_operations myfs_dir_fops = { 

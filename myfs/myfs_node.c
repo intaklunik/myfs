@@ -59,7 +59,8 @@ struct myfs_node * myfs_new_node(struct myfs_node *myfs_parent, struct dentry *d
 	inode->i_mode = mode;
 	
 	if (S_ISREG(mode)) {
-	
+		inode->i_op = &myfs_file_iops;
+		inode->i_fop = &myfs_file_fops;	
 	}
 	else if (S_ISDIR(mode)) {
 		inode->i_op = &myfs_dir_iops;

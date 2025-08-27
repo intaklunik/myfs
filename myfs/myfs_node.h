@@ -7,6 +7,8 @@
 
 extern const struct inode_operations myfs_dir_iops;
 extern const struct file_operations myfs_dir_fops;
+extern const struct inode_operations myfs_file_iops;
+extern const struct file_operations myfs_file_fops;
 
 struct myfs_file {
 	char *buf;

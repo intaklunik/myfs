@@ -1,6 +1,6 @@
 obj-m += myfs.o
 
-myfs-objs := myfs_main.o myfs_node.o myfs_dir.o
+myfs-objs := myfs_main.o myfs_node.o myfs_dir.o myfs_file.o
 
 
 all:
