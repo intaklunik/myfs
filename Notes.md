@@ -1,4 +1,7 @@
-# Notes
+# Filesystem
+- **struct inode** represents a file and stores file metadata (permissions, type, timestamps, etc.).
+- **struct dentry** represents a filename (directory entry), exists separatly from inode because 1 inode may have multiple dentries (hardlinks).
+- **struct file** represents an open file, stores the open mode, file position and a reference to the inode.
 
 ## Register and mount file system
 Define struct file_system_type, where:
@@ -147,6 +150,14 @@ The dentry for the root inode is created automatically during d_make_root() -> d
 | [lookup](#lookup)| +         | -    |
 | [mkdir](#mkdir)  | +         | -    |
 | [rmdir](#rmdir)  | +         | -    |
+| create           |           |      |
+| link             |           |      |
+| unlink           |           |      |
+| rename           |           |      |
+| [mknod](#mknod)  | +         | -    |
+| setattr          |           |      |
+| getattr          |           |      |
+| listxattr        |           |      |
 
 ### lookup
 lookup(struct inode *parent, struct dentry *dentry, unsigned int flags) - checks if the name in dentry exists under the parent directory.   
@@ -170,11 +181,52 @@ rmdir(struct inode *parent, struct dentry *dentry) - removes an **empty** direct
 2. Check if the directory is empty (your implementation). If not, return ENOTEMPTY.
 3. drop_nlink() for the parent directory and the current directory.
 
+### mknod
+mknod(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry, umode_t mode, dev_t rdev) - creates a special file (char, block, FIFO, socket) with the given name in the parent directory.
+
+1. Create and initialize new inode.
+2. Call init_special_inode(): for S_IFCHR and S_IFBLK it will set inode->i_rdev = rdev, and inode->i_fop = &def_chr_fops and &def_blk_fops. Device files use device-specific fops. During def_*_fops->open(), inode fops are replaced with device fops.
+3. d_instantiate(dentry, inode) - attach the new inode to the dentry.
 
 ## struct file_operations
 
-| Operation | Directory | File |
-|-----------|:---------:|:----:|
-|open       |+          |+     |
+| Operation                        | Directory | File |
+|----------------------------------|:---------:|:----:|
+|open                              |+          |+     |
+|release                           |           |      |
+|iterate_shared                    |+          |-     |
+|[read](#read)                     |-          |+     |
+|[write](#write)                   |-          |+     |
+|llseek                            |           |      |
+|mmap                              |           |      |
+|poll                              |           |      |
+|[unlocked_ioctl](#unlocked_ioctl) |+          |+     |
+|flush                             |           |      |
+|fsync                             |           |      |
 
+### read
+read(struct file *filp, char __user *buff, size_t count, loff_t *offp) - reads data from file *filp* into the user buffer *buff*.    
+Read may return fewer bytes than requested ( < *count*).  
+1. FS-specific code
+2. copy_to_user()
+3. Advance the file offset by the number of bytes actually read.
+4. Return number of bytes read, 0 (EOF) or negative error code (error).
 
+### write
+write(struct file *filp, const char __user *buff, size_t count, loff_t *offp) - writes data from user buffer *buff* into file *filp*.    
+Write may return fewer bytes than requested.
+1. FS-specific code
+2. copy_from_user()
+3. Advance the file offset by the number of bytes actually written.
+4. Return number of bytes written or negative error code (error).
+
+### unlocked_ioctl
+unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg) - handles ioctl command *cmd* with an argument *arg* for a file *filp*.  
+For custom ioctl commands:
+1. Choose an ioctl magic number [Read here](https://www.kernel.org/doc/html/latest/userspace-api/ioctl/ioctl-number.html)
+2. Define ioctl commands using macros _IO*(type, nr, argtype), where type is the magic number defined in step 1, nr - the command number, argtype - the argument type (may be a pointer).
+3. Use copy_to_user/copy_from_user or put_user/get_user to exchange data with userspace.
+4. Return -ENOTTY for unsupported commands.
+
+# Useful links
+[https://elixir.bootlin.com/linux/v6.9/source/Documentation/filesystems/vfs.rst](https://elixir.bootlin.com/linux/v6.9/source/Documentation/filesystems/vfs.rst)
