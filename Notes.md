@@ -96,6 +96,8 @@ If your inode structure embeds struct inode, you should create your own your_ino
 | write  | write to file        | create, delete, rename files in the dir     |
 | execute| run file as a program| enter the dir and use it in a file path (cd)|
 
+- i_rdev - device number written by mknod. Exists only for character and block device inodes, stored on disk.
+- i_cdev - pointer to struct cdev that owns this device number. Filled in at runtime, acts as a cache, not stored on disk. (Instead of looking up the cdev in cdev_map using i_rdev on every open(), the kernel performs lookup once and then stores the result in i_cdev; next open() call goes directly to i_cdev pointer [Source code](https://elixir.bootlin.com/linux/v6.16/source/fs/char_dev.c#L386))
 - i_op - inode_operations. You define 2 sets of i_op: for directories and files.
 - i_fop - file_operations. You define 2 sets of i_fop: for directories and files.
 - i_nlink - number of hard links. Initialized with 1 (the link is between the filename and the actual data): alloc_inode() -> inode_init_always() -> inode_init_always_gfp().  
