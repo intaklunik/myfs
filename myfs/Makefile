@@ -2,9 +2,11 @@ obj-m += myfs.o
 
 myfs-objs := myfs_main.o myfs_node.o myfs_dir.o myfs_file.o
 
+KDIR := /lib/modules/$(shell uname -r)/build
+BUILD_DIR := $(CURDIR)/../build
 
 all:
-	make -C /lib/modules/$(shell uname -r)/build M=$(CURDIR) modules
+	make -C $(KDIR) M=$(CURDIR) MO=$(BUILD_DIR) modules
 
 clean:
-	make -C /lib/modules/$(shell uname -r)/build M=$(CURDIR) clean 
+	make -C $(KDIR) M=$(CURDIR) MO=$(BUILD_DIR) clean 

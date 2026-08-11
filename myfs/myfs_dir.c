@@ -1,25 +1,25 @@
 #include "myfs_node.h"
 
 
-static int myfs_mkdir(struct mnt_idmap *idmap, struct inode *parent, struct dentry *dentry, umode_t mode)
+static struct dentry * myfs_mkdir(struct mnt_idmap *idmap, struct inode *parent, struct dentry *dentry, umode_t mode)
 {
 	struct myfs_node *myfs_parent = itomyfs(parent);
 	struct inode *dir;
 	struct myfs_node *myfs_dir = myfs_new_node(myfs_parent, dentry, S_IFDIR | mode);
 
 	if (IS_ERR(myfs_dir)) {
-		return PTR_ERR(myfs_dir);
+		return ERR_CAST(myfs_dir);
 	}	
 
 	dir = &myfs_dir->vfs_inode;
 
-       	myfs_node_link(myfs_parent, myfs_dir);
+    myfs_node_link(myfs_parent, myfs_dir);
 	
 	inc_nlink(parent);
 	d_instantiate(dentry, dir);
 	inc_nlink(dir);
 
-	return 0;
+	return NULL;
 }
 
 static int myfs_rmdir(struct inode *parent, struct dentry *dentry)
